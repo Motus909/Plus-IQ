@@ -18,16 +18,17 @@ function srGrade(items, id, ok, now = Date.now(), data) {
 }
 
 // allIds = feste Menge (Fragen, Länder) oder null (generierte Aufgaben -> null heisst "neu generieren")
-function srPick(items, prefix, allIds, recent = [], now = Date.now()) {
+// freshIds (optional): nur daraus werden NEUE Elemente gezogen (= freigeschaltete Schwierigkeit)
+function srPick(items, prefix, allIds, recent = [], now = Date.now(), freshIds = allIds) {
   const valid = allIds ? new Set(allIds) : null;
   const known = Object.keys(items).filter(id => id.startsWith(prefix) && !recent.includes(id) && (!valid || valid.has(id)));
   const due = known.filter(id => items[id].due <= now).sort((a, b) => items[a].due - items[b].due);
   if (due.length) return due[0];
   if (!allIds) return null;
-  const fresh = allIds.filter(id => !items[id] && !recent.includes(id));
+  const fresh = freshIds.filter(id => !items[id] && !recent.includes(id));
   if (fresh.length) return pick(fresh);
-  const pool = allIds.filter(id => !recent.includes(id)).sort((a, b) => items[a].due - items[b].due);
-  return pool[rnd(Math.min(5, pool.length))] || pick(allIds);
+  const pool = freshIds.filter(id => !recent.includes(id)).sort((a, b) => (items[a]?.due || 0) - (items[b]?.due || 0));
+  return pool[rnd(Math.min(5, pool.length))] || pick(freshIds);
 }
 
 // ---------- Sudoku ----------
@@ -98,18 +99,19 @@ const ATTR = {
 const attrMin = a => ATTR[a].min || 0;
 const attrMax = a => attrMin(a) + ATTR[a].n - 1;
 
-function lmShapes(R) {
+function lmShapes(R, L) {
   const ri = n => Math.floor(R() * n), rpick = a => a[ri(a.length)], rshuf = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = ri(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const names = ["shape", "count", "fill", "size"];
   let active;
-  do { active = rshuf(names).slice(0, R() < 0.6 ? 3 : 2); } while (active.includes("count") && active.includes("size"));
+  const nActive = L <= 1 ? 1 : L <= 3 ? 2 : L === 4 ? (R() < 0.5 ? 2 : 3) : 3;
+  do { active = rshuf(names).slice(0, nActive); } while (active.includes("count") && active.includes("size"));
   const rules = {}, grid = Array.from({ length: 9 }, () => ({ k: "shapes" }));
   const expl = [];
   for (const a of names) {
     const lo = attrMin(a), hi = a === "shape" ? ATTR.shape.progMax : attrMax(a);
     let rule;
-    if (active.includes(a)) rule = R() < 0.5 ? "prog" : "dist";
-    else if (a !== "size" && R() < 0.3 && !(a === "count" && active.includes("size"))) rule = "row";
+    if (active.includes(a)) rule = L <= 1 || R() < 0.5 ? "prog" : "dist";
+    else if (L >= 4 && a !== "size" && R() < 0.3 && !(a === "count" && active.includes("size"))) rule = "row";
     else rule = "const";
     if (a === "size" && (active.includes("count") || rules.count === "row")) rule = "const";
     rules[a] = rule;
@@ -147,23 +149,25 @@ function lmShapes(R) {
 
 const SEG_COUNT = 12;
 const popcount = m => { let n = 0; while (m) { n += m & 1; m >>= 1; } return n; };
-function lmLines(R) {
+function lmLines(R, L) {
   const ri = n => Math.floor(R() * n);
   const ops = [
-    ["xor", (a, b) => a ^ b, "Überlagern, doppelte Linien fallen weg"],
     ["or", (a, b) => a | b, "Überlagern (alle Linien zusammen)"],
-    ["and", (a, b) => a & b, "Nur Linien, die in beiden vorkommen"],
+    ["xor", (a, b) => a ^ b, "Überlagern, doppelte Linien fallen weg"],
     ["diff", (a, b) => a & ~b, "Erstes minus zweites (gemeinsame Linien fallen weg)"],
+    ["and", (a, b) => a & b, "Nur Linien, die in beiden vorkommen"],
   ];
-  const [, op, txt] = ops[ri(ops.length)];
-  const rndSet = () => { let m; do { m = 0; for (let i = 0; i < SEG_COUNT; i++) if (R() < 0.35) m |= 1 << i; } while (popcount(m) < 3 || popcount(m) > 6); return m; };
+  const nOps = L <= 1 ? 1 : L === 2 ? 2 : L === 3 ? 3 : 4;
+  const [, op, txt] = ops[ri(nOps)];
+  const [lo, hi] = L <= 2 ? [2, 4] : L === 3 ? [3, 5] : [3, 6];
+  const rndSet = () => { let m; do { m = 0; for (let i = 0; i < SEG_COUNT; i++) if (R() < 0.3) m |= 1 << i; } while (popcount(m) < lo || popcount(m) > hi); return m; };
   const rows = [];
   for (let r = 0; r < 3; r++) {
     let a, b;
     do { a = rndSet(); b = rndSet(); } while (!(a & b) || !(a & ~b) || !(b & ~a) || new Set(ops.map(o => o[1](a, b))).size < 4);
     rows.push([a, b, op(a, b)]);
   }
-  const transpose = R() < 0.5;
+  const transpose = L >= 3 && R() < 0.5;
   const grid = Array(9);
   for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) grid[transpose ? c * 3 + r : r * 3 + c] = { k: "lines", m: rows[r][c] };
   const ans = grid[8].m, ab = rows[2][0] | rows[2][1];
@@ -179,18 +183,21 @@ function lmLines(R) {
   return { grid, toggles: segs.map(s => ["seg" + s, null]), rule: `${transpose ? "Spalte" : "Zeile"}: Feld 3 = ${txt}` };
 }
 
-function lmMove(R) {
+function lmMove(R, L) {
   const ri = n => Math.floor(R() * n), rpick = a => a[ri(a.length)];
-  const steps = [1, 2, 3, -1, -2];
-  const kA = rpick(steps), kB = rpick(steps.filter(x => x !== kA)), kR = rpick([1, 2, -1, -2]);
-  const sA = ri(8), sB = ri(8), sR = ri(8), rA = ri(8), rB = ri(8), rR = ri(8);
+  const steps = L <= 2 ? [1, -1] : L === 3 ? [1, -1, 2] : [1, 2, 3, -1, -2];
+  const kA = rpick(steps);
+  const kB = L >= 3 ? rpick(steps.filter(x => x !== kA).concat(L === 3 ? [1, -1, 2, -2].filter(x => x !== kA) : [])) : 0;
+  const kR = L >= 2 ? rpick(L <= 3 ? [1, -1, 2] : [1, 2, -1, -2]) : 0;
+  const sA = ri(8), sB = ri(8), sR = ri(8), rA = ri(8), rB = kB ? ri(8) : 0, rR = kR ? ri(8) : 0;
   const m8 = x => ((x % 8) + 8) % 8, grid = [];
   for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++)
     grid.push({ k: "move", a: m8(sA + r * rA + c * kA), b: m8(sB + r * rB + c * kB), r: m8(sR + r * rR + c * kR) });
   const ans = grid[8];
   const toggles = [["a", m8(ans.a + rpick([1, -1, 2, 4]))], ["b", m8(ans.b + rpick([1, -1, 2, 4]))], ["r", m8(ans.r + rpick([1, -1, 2, 4]))]];
-  const dir = k => `${Math.abs(k)} ${Math.abs(k) === 1 ? "Feld" : "Felder"} ${k > 0 ? "im" : "gegen den"} Uhrzeigersinn`;
-  return { grid, toggles, rule: `Schwarzer Punkt: ${dir(kA)} · Ring: ${dir(kB)} · Pfeil: ${Math.abs(kR) * 45}° ${kR > 0 ? "im" : "gegen den"} Uhrzeigersinn – jeweils pro Spalte` };
+  const dir = k => k ? `${Math.abs(k)} ${Math.abs(k) === 1 ? "Feld" : "Felder"} ${k > 0 ? "im" : "gegen den"} Uhrzeigersinn` : "bleibt stehen";
+  const rot = kR ? `${Math.abs(kR) * 45}° ${kR > 0 ? "im" : "gegen den"} Uhrzeigersinn` : "bleibt gleich";
+  return { grid, toggles, rule: `Pro Spalte – Schwarzer Punkt: ${dir(kA)} · Ring: ${dir(kB)} · Pfeil: ${rot}` };
 }
 
 // SVG-Darstellung einer Zelle (100x100) als String
@@ -229,10 +236,11 @@ function lmCellSVG(c) {
 }
 
 const lmKey = c => JSON.stringify(c);
-function genLogicMatrix(seed) {
+// L = Stufe 1 (leicht) bis 5 (schwer)
+function genLogicMatrix(seed, L = 3) {
   const R = mulberry32(seed);
   const fam = [lmShapes, lmShapes, lmLines, lmMove][Math.floor(R() * 4)];
-  const { grid, toggles, rule } = fam(R);
+  const { grid, toggles, rule } = fam(R, L);
   const ans = grid[8], options = [];
   for (let k = 0; k < 8; k++) {
     const o = { ...ans };

@@ -95,3 +95,8 @@ footer { display: flex; justify-content: space-between; align-items: center; pad
 .fig .hl .o { stroke: #b3123a; }
 
 .ver { color: var(--muted); font-size: .75rem; }
+
+/* Stufen */
+.tags { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lvl { color: #f4a300; font-size: .85rem; letter-spacing: 1px; white-space: nowrap; }
+.lvlmsg { display: block; margin-top: 4px; }

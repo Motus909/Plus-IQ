@@ -18,15 +18,32 @@ function h(tag, attrs = {}, ...kids) {
 
 // ---------- Speicher ----------
 const KEY = "raetselmix-v1";
-const fresh = () => ({ items: {}, score: 0, streak: 0, best: 0, played: 0, cur: null });
+const fresh = () => ({ items: {}, score: 0, streak: 0, best: 0, played: 0, cur: null, lvl: {} });
 function load() { try { return Object.assign(fresh(), JSON.parse(localStorage.getItem(KEY))); } catch { return fresh(); } }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} }
 let S = load();
+S.lvl ||= {};
 for (const k of Object.keys(S.items)) if (k.startsWith("x:")) delete S.items[k]; // alte Rechen-Matrizen entfernen
 
 const recent = [];
 const remember = id => { recent.push(id); if (recent.length > 6) recent.shift(); };
 function grade(id, ok, data) { srGrade(S.items, id, ok, Date.now(), data); save(); }
+
+// ---------- Stufen ----------
+// Jeder Aufgabentyp hat eine eigene Stufe. Richtig: +1/3 Stufe, falsch: −1/2 Stufe.
+// Fragen/Karte/Anatomie: Stufe 1–3 = freigeschaltete Schwierigkeit. Matrizen/Flaggen/Sudoku: Stufe 1–5.
+const MAX_LVL = { frage: 3, medizin: 3, anatomie: 3, karte: 3, matrix: 5, flaggen: 5, sudoku: 5 };
+const UP = 1 / 3 + 0.001, DOWN = 0.5;
+let curType = null;
+const lvl = (t = curType) => Math.min(MAX_LVL[t] || 3, Math.floor(S.lvl[t] || 1));
+function bumpLevel(ok) {
+  const t = curType; if (!t || ok == null) return null;
+  const before = lvl(t), max = MAX_LVL[t];
+  const step = t === "sudoku" ? 1 : ok ? UP : -DOWN;
+  S.lvl[t] = Math.max(1, Math.min(max + 0.999, (S.lvl[t] || 1) + step));
+  const after = lvl(t);
+  return after > before ? `⬆️ Stufe ${after} erreicht!` : after < before ? `Zurück auf Stufe ${after}.` : null;
+}
 
 // ---------- Rahmen ----------
 const main = $("#main"), skipBtn = $("#skip");
@@ -70,7 +87,7 @@ function newCard() {
 function next() {
   S.cur = null; save();
   const type = chooseType();
-  lastType = type;
+  lastType = curType = type;
   TASKS[type].run(newCard());
   updateHud();
 }
@@ -79,21 +96,23 @@ function finish(card, ok, msg, pts = 10) {
   if (!card.isConnected) return;
   if (ok === true) { S.score += pts; S.streak++; S.best = Math.max(S.best, S.streak); }
   else if (ok === false) S.streak = 0;
+  const lvlMsg = bumpLevel(ok);
   S.played++; save(); updateHud();
   skipBtn.hidden = true;
   const fb = h("div", { class: "feedback " + (ok ? "good" : ok === false ? "bad" : "") },
-    h("span", {}, msg || (ok ? pick(PRAISE) : "Leider falsch.")),
+    h("span", {}, msg || (ok ? pick(PRAISE) : "Leider falsch."), lvlMsg ? h("b", { class: "lvlmsg" }, lvlMsg) : null),
     h("button", { class: "btn", onclick: next }, "Weiter →"));
   card.append(fb);
   fb.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-const tag = (txt, cls) => h("div", { class: "tag " + cls }, txt);
+const tag = (txt, cls) => h("div", { class: "tags" }, h("span", { class: "tag " + cls }, txt),
+  h("span", { class: "lvl" }, "★".repeat(lvl()) + "☆".repeat(MAX_LVL[curType] - lvl()), ` Stufe ${lvl()}`));
 
 // ---------- Multiple Choice (SR): Allgemeinwissen + Medizin ----------
 function runQuestion(card, list, prefix, label, cls) {
   const ids = list.map(q => prefix + q.q);
-  const id = srPick(S.items, prefix, ids, recent);
+  const id = srPick(S.items, prefix, ids, recent, Date.now(), list.filter(q => (q.d || 1) <= lvl()).map(q => prefix + q.q));
   const q = list.find(x => prefix + x.q === id);
   remember(id);
   card.append(tag(label, cls));
@@ -115,7 +134,7 @@ function runQuestion(card, list, prefix, label, cls) {
 // ---------- Anatomie-Abbildungen (SR pro Struktur) ----------
 function runAnatomy(card) {
   const ids = FIGURES.flatMap(f => Object.keys(f.parts).map(p => `a:${f.id}:${p}`));
-  const id = srPick(S.items, "a:", ids, recent);
+  const id = srPick(S.items, "a:", ids, recent, Date.now(), ids.filter(i => (ANATOMY_DIFF[i.slice(2)] || 1) <= lvl()));
   remember(id);
   const [, figId, part] = id.split(":");
   const fig = FIGURES.find(f => f.id === figId), answer = fig.parts[part];
@@ -146,7 +165,7 @@ const loadWorld = () => worldPromise ||= fetch(WORLD_URL).then(r => r.json())
 
 async function runMap(card) {
   const ids = COUNTRIES.map(c => "m:" + c[0]);
-  const id = srPick(S.items, "m:", ids, recent);
+  const id = srPick(S.items, "m:", ids, recent, Date.now(), ids.filter(i => countryDiff(i.slice(2)) <= lvl()));
   remember(id);
   const a2 = id.slice(2), num = COUNTRIES.find(c => c[0] === a2)[1];
   card.append(tag("Weltkarte", "t-karte"), h("h2", {}, "Wo liegt ", h("b", {}, nameOf(a2)), "?"),
@@ -180,11 +199,11 @@ async function runMap(card) {
 
 // ---------- Logik-Matrizen (SR über Seed) ----------
 function runMatrix(card) {
-  let id = srPick(S.items, "lm:", null, recent), seed;
-  if (id) seed = S.items[id].data.seed;
+  let id = srPick(S.items, "lm:", null, recent), seed, L = lvl();
+  if (id) ({ seed, lvl: L = 3 } = S.items[id].data);
   else { seed = (Math.random() * 2 ** 31) | 0; id = "lm:" + seed; }
   remember(id);
-  const t = genLogicMatrix(seed), ansKey = lmKey(t.answer);
+  const t = genLogicMatrix(seed, L), ansKey = lmKey(t.answer);
   card.append(tag("Matrizen", "t-matrix"), h("h2", {}, "Welches Feld ergänzt die Matrix?"));
   const grid = h("div", { class: "lm-grid" });
   [...t.grid, null].forEach(c => { const d = h("div", { class: "lm-cell" + (c ? "" : " q") }); d.innerHTML = lmCellSVG(c); grid.append(d); });
@@ -195,7 +214,7 @@ function runMatrix(card) {
       const ok = lmKey(o) === ansKey;
       [...opts.children].forEach(x => { x.disabled = true; if (x.dataset.ok) x.classList.add("good"); });
       if (!ok) b.classList.add("bad");
-      grade(id, ok, { seed });
+      grade(id, ok, { seed, lvl: L });
       card.append(h("p", { class: "hint rule" }, "Regel: " + t.rule));
       finish(card, ok, ok ? null : "Nicht ganz – grün markiert ist die Lösung.", 15);
     } });
@@ -209,7 +228,13 @@ function runMatrix(card) {
 
 // ---------- Flaggen zuordnen (zufällig) ----------
 function runFlags(card) {
-  const pool = shuffle(COUNTRIES).slice(0, 4);
+  const L = lvl(), n = [3, 4, 4, 5, 6][L - 1];
+  const base = COUNTRIES.filter(c => countryDiff(c[0]) <= Math.min(3, L));
+  let picked = [];
+  if (L >= 4) for (const g of shuffle(FLAG_LOOKALIKES).slice(0, L - 3)) picked.push(...shuffle(g).slice(0, 3).filter(a => !picked.includes(a)));
+  picked = picked.slice(0, n);
+  for (const [a2] of shuffle(base)) { if (picked.length >= n) break; if (!picked.includes(a2)) picked.push(a2); }
+  const pool = shuffle(picked).map(a2 => COUNTRIES.find(c => c[0] === a2));
   card.append(tag("Flaggen", "t-flaggen"), h("h2", {}, "Erst Flagge, dann Land antippen"));
   const flags = h("div", { class: "flags" }), names = h("div", { class: "opts" });
   let sel = null, matched = 0, errors = 0;
@@ -233,7 +258,7 @@ function runFlags(card) {
 
 // ---------- Sudoku (zufällig, Fortschritt bleibt gespeichert) ----------
 function runSudoku(card, resume) {
-  const st = resume || (() => { const { puzzle, solution } = generateSudoku(44); return { type: "sudoku", puz: puzzle, sol: solution, cur: [...puzzle] }; })();
+  const st = resume || (() => { const { puzzle, solution } = generateSudoku([30, 36, 42, 48, 54][lvl() - 1]); return { type: "sudoku", puz: puzzle, sol: solution, cur: [...puzzle] }; })();
   S.cur = st; save();
   card.append(tag("Sudoku", "t-sudoku"));
   const grid = h("div", { class: "sudoku" });
@@ -281,5 +306,5 @@ skipBtn.onclick = next;
 $("#reset").onclick = () => { if (confirm("Gesamten Fortschritt löschen?")) { S = fresh(); save(); next(); } };
 updateHud();
 setInterval(updateHud, 30e3);
-if (S.cur && S.cur.type === "sudoku") { lastType = "sudoku"; runSudoku(newCard(), S.cur); }
+if (S.cur && S.cur.type === "sudoku") { lastType = curType = "sudoku"; runSudoku(newCard(), S.cur); }
 else next();
