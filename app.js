@@ -22,6 +22,7 @@ const fresh = () => ({ items: {}, score: 0, streak: 0, best: 0, played: 0, cur: 
 function load() { try { return Object.assign(fresh(), JSON.parse(localStorage.getItem(KEY))); } catch { return fresh(); } }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch {} }
 let S = load();
+for (const k of Object.keys(S.items)) if (k.startsWith("x:")) delete S.items[k]; // alte Rechen-Matrizen entfernen
 
 const recent = [];
 const remember = id => { recent.push(id); if (recent.length > 6) recent.shift(); };
@@ -177,38 +178,33 @@ async function runMap(card) {
     .on("zoom", e => g.attr("transform", e.transform)));
 }
 
-// ---------- Matrizen (SR) ----------
-const matEl = (A, cls = "") => h("table", { class: "mat " + cls }, A.map(r => h("tr", {}, r.map(v => h("td", {}, v)))));
-const PROMPT = { det2: "Berechne det(A)", det3: "Berechne det(A)", mul2: "Berechne A · B", matvec: "Berechne A · v" };
-
+// ---------- Logik-Matrizen (SR über Seed) ----------
 function runMatrix(card) {
-  let id = srPick(S.items, "x:", null, recent), task;
-  if (id) task = S.items[id].data;
-  else { task = genMatrix(); id = "x:" + JSON.stringify(task); }
+  let id = srPick(S.items, "lm:", null, recent), seed;
+  if (id) seed = S.items[id].data.seed;
+  else { seed = (Math.random() * 2 ** 31) | 0; id = "lm:" + seed; }
   remember(id);
-  const sol = solveMatrix(task);
-  card.append(tag("Matrizen", "t-matrix"), h("h2", {}, PROMPT[task.t]));
-  const isDet = task.t.startsWith("det");
-  const expr = h("div", { class: "expr" }, h("span", {}, "A ="), matEl(task.A));
-  if (task.B) expr.append(h("span", {}, "B ="), matEl(task.B));
-  if (task.v) expr.append(h("span", {}, "v ="), matEl(task.v));
-  card.append(expr);
-  const inputs = sol.map(r => r.map(() => h("input", { type: "number", class: "num" })));
-  const ans = h("div", { class: "expr" }, h("span", {}, "="),
-    h("table", { class: "mat " + (isDet ? "plain" : "") }, inputs.map(r => h("tr", {}, r.map(i => h("td", {}, i))))));
-  const btn = h("button", { class: "btn", onclick: () => {
-    let ok = true;
-    inputs.forEach((r, i) => r.forEach((inp, j) => {
-      const good = inp.value.trim() !== "" && Number(inp.value) === sol[i][j];
-      inp.classList.add(good ? "good" : "bad"); inp.disabled = true; ok &&= good;
-    }));
-    btn.remove();
-    grade(id, ok, task);
-    if (!ok) card.append(h("div", { class: "expr" }, h("span", {}, "Lösung:"), matEl(sol, isDet ? "plain" : "")));
-    finish(card, ok, ok ? null : "Nicht ganz – kommt bald wieder.", 15);
-  } }, "Prüfen");
-  card.append(ans, btn);
-  inputs[0][0].focus();
+  const t = genLogicMatrix(seed), ansKey = lmKey(t.answer);
+  card.append(tag("Matrizen", "t-matrix"), h("h2", {}, "Welches Feld ergänzt die Matrix?"));
+  const grid = h("div", { class: "lm-grid" });
+  [...t.grid, null].forEach(c => { const d = h("div", { class: "lm-cell" + (c ? "" : " q") }); d.innerHTML = lmCellSVG(c); grid.append(d); });
+  card.append(grid);
+  const opts = h("div", { class: "lm-opts" });
+  shuffle(t.options).forEach((o, i) => {
+    const b = h("button", { class: "lm-cell lm-opt", onclick: () => {
+      const ok = lmKey(o) === ansKey;
+      [...opts.children].forEach(x => { x.disabled = true; if (x.dataset.ok) x.classList.add("good"); });
+      if (!ok) b.classList.add("bad");
+      grade(id, ok, { seed });
+      card.append(h("p", { class: "hint rule" }, "Regel: " + t.rule));
+      finish(card, ok, ok ? null : "Nicht ganz – grün markiert ist die Lösung.", 15);
+    } });
+    if (lmKey(o) === ansKey) b.dataset.ok = "1";
+    b.innerHTML = lmCellSVG(o);
+    b.append(h("span", { class: "lm-label" }, "ABCDEFGH"[i]));
+    opts.append(b);
+  });
+  card.append(opts);
 }
 
 // ---------- Flaggen zuordnen (zufällig) ----------

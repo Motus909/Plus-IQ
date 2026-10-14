@@ -82,27 +82,166 @@ function generateSudoku(holes = 44) {
 
 const hasConflict = (g, i) => !!g[i] && PEERS[i].some(j => g[j] === g[i]);
 
-// ---------- Matrizen ----------
-function genMatrix() {
-  const r5 = () => rnd(11) - 5, r3 = () => rnd(7) - 3;
-  const M = (n, m, f) => Array.from({ length: n }, () => Array.from({ length: m }, f));
-  const t = pick(["det2", "det3", "mul2", "matvec"]);
-  if (t === "det2") return { t, A: M(2, 2, r5) };
-  if (t === "det3") return { t, A: M(3, 3, r3) };
-  if (t === "mul2") return { t, A: M(2, 2, r5), B: M(2, 2, r5) };
-  return { t, A: M(3, 3, r3), v: M(3, 1, r3) };
+// ---------- Logik-Matrizen (3x3, letztes Feld fehlt) ----------
+// Deterministisch aus einem Seed -> für Spaced Repetition reicht es, den Seed zu speichern.
+function mulberry32(a) {
+  return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 }
-function det(A) {
-  if (A.length === 2) return A[0][0] * A[1][1] - A[0][1] * A[1][0];
-  let d = 0;
-  for (let j = 0; j < A.length; j++) d += (j % 2 ? -1 : 1) * A[0][j] * det(A.slice(1).map(r => r.filter((_, k) => k !== j)));
-  return d;
-}
-const mul = (A, B) => A.map(row => B[0].map((_, j) => row.reduce((s, a, k) => s + a * B[k][j], 0)));
-function solveMatrix(task) {
-  if (task.t === "det2" || task.t === "det3") return [[det(task.A) || 0]];
-  if (task.t === "mul2") return mul(task.A, task.B);
-  return mul(task.A, task.v);
+const SHAPE_NAMES = ["Dreieck", "Quadrat", "Fünfeck", "Sechseck", "Kreis"];
+const FILL_NAMES = ["weiss", "hellgrau", "dunkelgrau", "schwarz"];
+const ATTR = {
+  shape: { n: 5, progMax: 3, label: "Form", fmt: v => SHAPE_NAMES[v] },
+  count: { n: 6, min: 1, label: "Anzahl", fmt: v => v },
+  fill:  { n: 4, label: "Füllung", fmt: v => FILL_NAMES[v] },
+  size:  { n: 4, label: "Grösse", fmt: v => ["klein", "mittel", "gross", "sehr gross"][v] },
+};
+const attrMin = a => ATTR[a].min || 0;
+const attrMax = a => attrMin(a) + ATTR[a].n - 1;
+
+function lmShapes(R) {
+  const ri = n => Math.floor(R() * n), rpick = a => a[ri(a.length)], rshuf = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = ri(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const names = ["shape", "count", "fill", "size"];
+  let active;
+  do { active = rshuf(names).slice(0, R() < 0.6 ? 3 : 2); } while (active.includes("count") && active.includes("size"));
+  const rules = {}, grid = Array.from({ length: 9 }, () => ({ k: "shapes" }));
+  const expl = [];
+  for (const a of names) {
+    const lo = attrMin(a), hi = a === "shape" ? ATTR.shape.progMax : attrMax(a);
+    let rule;
+    if (active.includes(a)) rule = R() < 0.5 ? "prog" : "dist";
+    else if (a !== "size" && R() < 0.3 && !(a === "count" && active.includes("size"))) rule = "row";
+    else rule = "const";
+    if (a === "size" && (active.includes("count") || rules.count === "row")) rule = "const";
+    rules[a] = rule;
+    if (rule === "prog") {
+      const d = R() < 0.5 ? 1 : -1;
+      for (let r = 0; r < 3; r++) {
+        const s = d > 0 ? lo + ri(hi - lo - 1) : lo + 2 + ri(hi - lo - 1);
+        for (let c = 0; c < 3; c++) grid[r * 3 + c][a] = s + c * d;
+      }
+      expl.push(`${ATTR[a].label}: ${a === "shape" ? (d > 0 ? "+1 Ecke" : "−1 Ecke") : a === "count" ? (d > 0 ? "+1" : "−1") : (d > 0 ? "eine Stufe mehr" : "eine Stufe weniger")} pro Spalte`);
+    } else if (rule === "dist") {
+      const vals = rshuf([...Array(ATTR[a].n).keys()].map(v => v + lo)).slice(0, 3), sh = 1 + ri(2);
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) grid[r * 3 + c][a] = vals[(c + r * sh) % 3];
+      expl.push(`${ATTR[a].label}: jede Zeile enthält ${vals.map(ATTR[a].fmt).join(", ")} je einmal`);
+    } else if (rule === "row") {
+      const vals = rshuf([...Array(ATTR[a].n).keys()].map(v => v + lo)).slice(0, 3);
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) grid[r * 3 + c][a] = vals[r];
+      expl.push(`${ATTR[a].label}: innerhalb einer Zeile gleich`);
+    } else {
+      const v = a === "count" ? 1 + ri(4) : a === "size" ? 2 + ri(2) : lo + ri(ATTR[a].n);
+      grid.forEach(g => g[a] = v);
+    }
+  }
+  // Distraktoren: 3 Attribute, je ein falscher Wert -> 8 Kombinationen, jeder Wert kommt 4x vor (nicht erratbar)
+  const order = [...rshuf(active), ...rshuf(names.filter(a => rules[a] === "row")), ...rshuf(names.filter(a => rules[a] === "const"))];
+  const toggles = order.slice(0, 3).map(a => {
+    const ans = grid[8][a];
+    const seen = [...new Set(grid.slice(0, 8).map(g => g[a]))].filter(v => v !== ans);
+    let alt = seen.length ? rpick(seen) : null;
+    if (alt === null) { const cand = [...Array(ATTR[a].n).keys()].map(v => v + attrMin(a)).filter(v => v !== ans && Math.abs(v - ans) <= 2); alt = rpick(cand); }
+    return [a, alt];
+  });
+  return { grid, toggles, rule: expl.join(" · ") || "Alles bleibt gleich" };
 }
 
-if (typeof module !== "undefined") module.exports = { srGrade, srPick, generateSudoku, countSolutions, hasConflict, genMatrix, det, solveMatrix, INTERVALS };
+const SEG_COUNT = 12;
+const popcount = m => { let n = 0; while (m) { n += m & 1; m >>= 1; } return n; };
+function lmLines(R) {
+  const ri = n => Math.floor(R() * n);
+  const ops = [
+    ["xor", (a, b) => a ^ b, "Überlagern, doppelte Linien fallen weg"],
+    ["or", (a, b) => a | b, "Überlagern (alle Linien zusammen)"],
+    ["and", (a, b) => a & b, "Nur Linien, die in beiden vorkommen"],
+    ["diff", (a, b) => a & ~b, "Erstes minus zweites (gemeinsame Linien fallen weg)"],
+  ];
+  const [, op, txt] = ops[ri(ops.length)];
+  const rndSet = () => { let m; do { m = 0; for (let i = 0; i < SEG_COUNT; i++) if (R() < 0.35) m |= 1 << i; } while (popcount(m) < 3 || popcount(m) > 6); return m; };
+  const rows = [];
+  for (let r = 0; r < 3; r++) {
+    let a, b;
+    do { a = rndSet(); b = rndSet(); } while (!(a & b) || !(a & ~b) || !(b & ~a) || new Set(ops.map(o => o[1](a, b))).size < 4);
+    rows.push([a, b, op(a, b)]);
+  }
+  const transpose = R() < 0.5;
+  const grid = Array(9);
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) grid[transpose ? c * 3 + r : r * 3 + c] = { k: "lines", m: rows[r][c] };
+  const ans = grid[8].m, ab = rows[2][0] | rows[2][1];
+  let segs;
+  for (let tries = 0; tries < 200; tries++) {
+    const pool = [...Array(SEG_COUNT).keys()].filter(i => (ab >> i) & 1 || R() < 0.2);
+    segs = []; while (segs.length < 3 && pool.length) segs.push(pool.splice(ri(pool.length), 1)[0]);
+    if (segs.length < 3) continue;
+    let ok = true;
+    for (let k = 0; k < 8; k++) { let m = ans; segs.forEach((s, j) => { if ((k >> j) & 1) m ^= 1 << s; }); if (!m) ok = false; }
+    if (ok) break;
+  }
+  return { grid, toggles: segs.map(s => ["seg" + s, null]), rule: `${transpose ? "Spalte" : "Zeile"}: Feld 3 = ${txt}` };
+}
+
+function lmMove(R) {
+  const ri = n => Math.floor(R() * n), rpick = a => a[ri(a.length)];
+  const steps = [1, 2, 3, -1, -2];
+  const kA = rpick(steps), kB = rpick(steps.filter(x => x !== kA)), kR = rpick([1, 2, -1, -2]);
+  const sA = ri(8), sB = ri(8), sR = ri(8), rA = ri(8), rB = ri(8), rR = ri(8);
+  const m8 = x => ((x % 8) + 8) % 8, grid = [];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++)
+    grid.push({ k: "move", a: m8(sA + r * rA + c * kA), b: m8(sB + r * rB + c * kB), r: m8(sR + r * rR + c * kR) });
+  const ans = grid[8];
+  const toggles = [["a", m8(ans.a + rpick([1, -1, 2, 4]))], ["b", m8(ans.b + rpick([1, -1, 2, 4]))], ["r", m8(ans.r + rpick([1, -1, 2, 4]))]];
+  const dir = k => `${Math.abs(k)} ${Math.abs(k) === 1 ? "Feld" : "Felder"} ${k > 0 ? "im" : "gegen den"} Uhrzeigersinn`;
+  return { grid, toggles, rule: `Schwarzer Punkt: ${dir(kA)} · Ring: ${dir(kB)} · Pfeil: ${Math.abs(kR) * 45}° ${kR > 0 ? "im" : "gegen den"} Uhrzeigersinn – jeweils pro Spalte` };
+}
+
+// SVG-Darstellung einer Zelle (100x100) als String
+const LM_FILLS = ["#ffffff", "#c8c8c8", "#6e6e6e", "#111111"];
+const LM_LAYOUT = {
+  1: [[[50, 50]], 72], 2: [[[29, 50], [71, 50]], 38], 3: [[[50, 29], [29, 71], [71, 71]], 36],
+  4: [[[29, 29], [71, 29], [29, 71], [71, 71]], 36], 5: [[[26, 26], [74, 26], [50, 50], [26, 74], [74, 74]], 28],
+  6: [[[24, 33], [50, 33], [76, 33], [24, 67], [50, 67], [76, 67]], 24],
+};
+const LM_SEGS = [[15,15,85,15],[15,85,85,85],[15,15,15,85],[85,15,85,85],[15,15,85,85],[85,15,15,85],[15,50,85,50],[50,15,50,85],[50,15,85,50],[85,50,50,85],[50,85,15,50],[15,50,50,15]];
+const LM_POS = [[20,20],[50,20],[80,20],[80,50],[80,80],[50,80],[20,80],[20,50]];
+function lmShapeEl(shape, x, y, d, fill) {
+  const st = `fill="${fill}" stroke="#111" stroke-width="2.2" stroke-linejoin="round"`;
+  if (shape === 4) return `<circle cx="${x}" cy="${y}" r="${d / 2}" ${st}/>`;
+  const n = shape + 3, r = d / 2 * (n === 3 ? 1.12 : n === 4 ? 0.92 : 1), off = n === 4 ? Math.PI / 4 : 0;
+  const cy = n === 3 ? y + r * 0.18 : y;
+  const pts = [...Array(n).keys()].map(i => { const t = -Math.PI / 2 + off + i * 2 * Math.PI / n; return `${(x + r * Math.cos(t)).toFixed(1)},${(cy + r * Math.sin(t)).toFixed(1)}`; });
+  return `<polygon points="${pts.join(" ")}" ${st}/>`;
+}
+function lmCellSVG(c) {
+  let inner = "";
+  if (!c) inner = `<text x="50" y="64" text-anchor="middle" font-size="44" font-weight="700" fill="#7b5cff">?</text>`;
+  else if (c.k === "shapes") {
+    const [slots, sz] = LM_LAYOUT[c.count];
+    inner = slots.map(([x, y]) => lmShapeEl(c.shape, x, y, sz * [0.5, 0.66, 0.82, 1][c.size], LM_FILLS[c.fill])).join("");
+  } else if (c.k === "lines") {
+    inner = LM_SEGS.map((s, i) => (c.m >> i) & 1 ? `<line x1="${s[0]}" y1="${s[1]}" x2="${s[2]}" y2="${s[3]}"/>` : "").join("");
+    inner = `<g stroke="#111" stroke-width="4.5" stroke-linecap="round">${inner}</g>`;
+  } else if (c.k === "move") {
+    inner = LM_POS.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="2" fill="#bbb"/>`).join("");
+    const [bx, by] = LM_POS[c.b], [ax, ay] = LM_POS[c.a];
+    inner += `<circle cx="${bx}" cy="${by}" r="12" fill="none" stroke="#111" stroke-width="3"/><circle cx="${ax}" cy="${ay}" r="7" fill="#111"/>`;
+    inner += `<g transform="rotate(${c.r * 45} 50 50)" stroke="#e76f51" stroke-width="4" stroke-linecap="round" fill="none"><line x1="50" y1="62" x2="50" y2="38"/><polyline points="43,45 50,38 57,45"/></g>`;
+  }
+  return `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" fill="#fff"/>${inner}</svg>`;
+}
+
+const lmKey = c => JSON.stringify(c);
+function genLogicMatrix(seed) {
+  const R = mulberry32(seed);
+  const fam = [lmShapes, lmShapes, lmLines, lmMove][Math.floor(R() * 4)];
+  const { grid, toggles, rule } = fam(R);
+  const ans = grid[8], options = [];
+  for (let k = 0; k < 8; k++) {
+    const o = { ...ans };
+    toggles.forEach(([a, alt], j) => {
+      if (!((k >> j) & 1)) return;
+      if (a.startsWith("seg")) o.m ^= 1 << +a.slice(3); else o[a] = alt;
+    });
+    options.push(o);
+  }
+  return { grid: grid.slice(0, 8), answer: ans, options, rule };
+}
+if (typeof module !== "undefined") module.exports = { srGrade, srPick, generateSudoku, countSolutions, hasConflict, genLogicMatrix, lmKey, lmCellSVG, popcount, INTERVALS };
