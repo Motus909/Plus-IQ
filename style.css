@@ -93,3 +93,5 @@ footer { display: flex; justify-content: space-between; align-items: center; pad
 .fig .hl .f, .fig .hl .t { fill: #ef476f; stroke: #b3123a; }
 .fig .hl .l, .fig .hl .k { stroke: #ef476f; }
 .fig .hl .o { stroke: #b3123a; }
+
+.ver { color: var(--muted); font-size: .75rem; }
