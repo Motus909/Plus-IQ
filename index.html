@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Rätselmix</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1 id="title">Rätselmix</h1>
+    <div class="hud"><span id="score"></span><span id="streak"></span><span id="due"></span></div>
+  </header>
+  <main id="main"></main>
+  <footer>
+    <button id="skip" class="btn ghost">Überspringen</button>
+    <button id="reset" class="link">Fortschritt zurücksetzen</button>
+  </footer>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <script src="data.js"></script>
+  <script src="data-med.js"></script>
+  <script src="figures.js"></script>
+  <script src="logic.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

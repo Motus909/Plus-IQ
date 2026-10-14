@@ -1,0 +1,91 @@
+:root {
+  --bg: #fff7f0; --card: #ffffff; --ink: #2b2140; --muted: #7a6f8f;
+  --good: #2bb673; --bad: #ef476f; --accent: #7b5cff; --line: #e6def5;
+  --frage: #ff9f1c; --karte: #2ec4b6; --matrix: #7b5cff; --flaggen: #ef476f; --sudoku: #118ab2;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #17131f; --card: #231d30; --ink: #f3eefc; --muted: #a99cc4; --line: #3a3150; }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh; color: var(--ink);
+  font: 17px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg) radial-gradient(circle at 10% 0%, #ffd6e855, transparent 40%), radial-gradient(circle at 90% 10%, #c9f2ff55, transparent 40%);
+  background-attachment: fixed;
+}
+header, main, footer { max-width: 640px; margin: 0 auto; padding: 0 16px; }
+header { padding-top: 16px; }
+h1 { margin: 0 0 4px; font-size: 1.6rem; background: linear-gradient(90deg, var(--frage), var(--flaggen), var(--matrix), var(--karte)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hud { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: .9rem; }
+h2 { font-size: 1.2rem; margin: 8px 0 14px; }
+
+.card { background: var(--card); border-radius: 20px; padding: 18px; margin: 14px 0; box-shadow: 0 6px 24px #0000001a; }
+.pop { animation: pop .3s ease-out; }
+@keyframes pop { from { transform: scale(.96); opacity: 0; } }
+.tag { display: inline-block; padding: 3px 10px; border-radius: 99px; color: #fff; font-size: .8rem; font-weight: 700; }
+.t-frage { background: var(--frage); } .t-karte { background: var(--karte); } .t-matrix { background: var(--matrix); }
+.t-flaggen { background: var(--flaggen); } .t-medizin { background: #e76f51; } .t-anatomie { background: #2a9d8f; } .t-sudoku { background: var(--sudoku); }
+.hint { color: var(--muted); font-size: .9rem; margin: 6px 0; }
+
+button { font: inherit; color: inherit; cursor: pointer; }
+.btn { border: 0; border-radius: 12px; padding: 10px 18px; background: var(--accent); color: #fff; font-weight: 600; margin-top: 12px; }
+.btn.ghost { background: transparent; color: var(--accent); border: 2px solid var(--accent); }
+.link { background: none; border: 0; color: var(--muted); font-size: .8rem; text-decoration: underline; }
+footer { display: flex; justify-content: space-between; align-items: center; padding-bottom: 32px; }
+
+.opts { display: grid; gap: 10px; }
+.opt { text-align: left; border: 2px solid var(--line); background: var(--card); border-radius: 12px; padding: 12px 14px; transition: .15s; }
+.opt:not(:disabled):active { transform: scale(.98); }
+.good { border-color: var(--good) !important; background: color-mix(in srgb, var(--good) 18%, var(--card)) !important; }
+.bad { border-color: var(--bad) !important; background: color-mix(in srgb, var(--bad) 18%, var(--card)) !important; }
+
+.feedback { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 14px; border-radius: 12px; background: var(--line); }
+.feedback.good { background: color-mix(in srgb, var(--good) 20%, var(--card)); }
+.feedback.bad { background: color-mix(in srgb, var(--bad) 20%, var(--card)); }
+.feedback .btn { margin: 0; white-space: nowrap; }
+
+/* Karte */
+.map { border-radius: 12px; overflow: hidden; background: #bfe6ff; touch-action: none; min-height: 120px; color: #234; }
+.map svg { display: block; width: 100%; height: auto; }
+.land { fill: #f4efe2; stroke: #8a8070; stroke-width: .6; vector-effect: non-scaling-stroke; }
+.land:hover { fill: #ffe8a3; }
+.land.good { fill: var(--good); } .land.bad { fill: var(--bad); }
+
+/* Flaggen */
+.flags { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.flag { border: 3px solid var(--line); border-radius: 10px; padding: 4px; background: var(--card); aspect-ratio: 3 / 2; }
+.flag img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.flag.sel { border-color: var(--accent); transform: scale(1.03); }
+
+/* Matrizen */
+.expr { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 10px 0; font-weight: 600; }
+.mat { border-collapse: collapse; border-left: 2px solid var(--ink); border-right: 2px solid var(--ink); border-radius: 6px; }
+.mat td { padding: 4px 10px; text-align: center; min-width: 2.2em; }
+.mat.plain { border-color: transparent; }
+.num { width: 4.2em; padding: 6px; border-radius: 8px; border: 2px solid var(--line); background: var(--card); color: var(--ink); font: inherit; text-align: center; }
+
+/* Sudoku */
+.sudoku { display: grid; grid-template-columns: repeat(9, 1fr); border: 2px solid var(--ink); border-radius: 6px; overflow: hidden; margin-top: 10px; max-width: 460px; }
+.cell { aspect-ratio: 1; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--card); font-size: clamp(14px, 5vw, 22px); color: var(--accent); padding: 0; }
+.cell.given { color: var(--ink); font-weight: 700; }
+.cell.br { border-right: 2px solid var(--ink); } .cell.bb { border-bottom: 2px solid var(--ink); }
+.cell.same { background: color-mix(in srgb, var(--accent) 15%, var(--card)); }
+.cell.sel { background: color-mix(in srgb, var(--accent) 35%, var(--card)); }
+.cell.conflict, .cell.wrong { color: var(--bad); background: color-mix(in srgb, var(--bad) 15%, var(--card)); }
+.pad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 12px; max-width: 460px; }
+.pad button { border: 0; border-radius: 10px; padding: 12px 0; background: var(--line); font-size: 1.1rem; font-weight: 600; }
+
+/* Medizin-Bilder & Anatomie-Abbildungen */
+.qimg { display: block; max-width: 100%; max-height: 45vh; margin: 10px auto 0; border-radius: 10px; }
+.fig { background: #fff; border-radius: 12px; padding: 8px; margin-bottom: 14px; }
+.fig svg { display: block; width: 100%; height: auto; max-height: 50vh; }
+.fig .f { fill: #efe4d2; stroke: #7d6a58; stroke-width: 1.5; }
+.fig .f.v { fill: #cdb89c; }
+.fig .l { fill: none; stroke: #e9dcc6; stroke-linecap: round; stroke-linejoin: round; }
+.fig .o { fill: none; stroke: #7d6a58; stroke-linecap: round; stroke-linejoin: round; }
+.fig .t { fill: transparent; stroke: none; }
+.fig .k { fill: none; stroke: #5c4b3d; stroke-linecap: round; }
+.fig .d { fill: none; stroke: #7d6a58; stroke-width: 1.2; }
+.fig .hl .f, .fig .hl .t { fill: #ef476f; stroke: #b3123a; }
+.fig .hl .l, .fig .hl .k { stroke: #ef476f; }
+.fig .hl .o { stroke: #b3123a; }
